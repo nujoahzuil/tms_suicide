@@ -1,0 +1,268 @@
+---
+title: "俄罗斯自杀率和人口、经济指标关系研究"
+author: "刘昭君"
+date: "2021/6/19"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    toc_depth: 4
+    gallery: false
+    highlight: tango
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+
+# 数据处理
+```{r}
+#读取数据
+data<-read.csv('全球自杀率数据.csv')
+colnames(data)[1]<-'country'
+data$gdp_for_year....<-gsub('[,]','',data$gdp_for_year....)#删除逗号
+data$gdp_for_year....<-as.numeric(data$gdp_for_year....)
+#数据概况
+summary(data)
+```
+
+```{r}
+#查看缺失情况
+library(tidyverse)
+library(naniar)
+data %>% miss_var_summary()#只有HDI大量缺失，直接删除该变量
+#删除country.year和HDI
+data<-data[,-c(8,9)]
+```
+
+```{r}
+#重新定义年龄因子水平
+data$age<-ordered(data$age,levels=c('5-14 years','15-24 years','25-34 years','35-54 years','55-74 years','75+ years'))
+#将gereration映射为数字
+data$generation[data$generation=='Silent']<-2
+data$generation[data$generation=='G.I. Generation']<-1
+data$generation[data$generation=='Boomers']<-4
+data$generation[data$generation=='Generation X']<-3
+data$generation[data$generation=='Millenials']<-5
+data$generation[data$generation=='Generation Z']<-6
+data1<-data[data$country=='Russian Federation',]
+data1<-data1[,-1]
+summary(data1)
+```
+# 探索性分析
+
+## 各年龄段和性别的平均自杀率柱状图
+```{r}
+#计算各年龄段平均自杀率
+sui_rate<-aggregate(data1$suicides.100k.pop,data1[,c('sex','age')],mean)
+colnames(sui_rate)[3]<-'mean.suicides.100k.pop'
+#绘制复式条形图
+library(ggplot2)
+ggplot(sui_rate,aes(x=age,y=mean.suicides.100k.pop,fill=sex))+geom_bar(position = 'dodge',stat ='identity')+xlab('age')+ylab('suicide rate(1/10000)')
+```
+
+
+
+## 各年龄段和性别的自杀率与人均GDP对比时序图
+```{r}
+#按年龄和性别分组
+data1$group<-paste(data1$sex,data1$age)
+per_gdp<-unique(data1[,c(1,8)])
+gdp<-unique(data1[,c(1,7)])
+ggplot()+geom_bar(data=per_gdp,aes(x=year,y=gdp_per_capita..../100),stat='identity',alpha=0.2)+geom_line(data=data1,aes(x=year,y=suicides.100k.pop,group=group,color=group))+ylab('suicide rate(1/10000) & per gdp/100')
+```
+
+## 男性各年龄段和性别的自杀率与人均GDP对比时序图
+```{r}
+data2<-data1[data1$sex=='male',]
+ggplot()+geom_bar(data=per_gdp,aes(x=year,y=gdp_per_capita..../100),stat='identity',alpha=0.2)+geom_line(data=data2,aes(x=year,y=suicides.100k.pop,group=group,color=group))+ylab('suicide rate(1/10000) & per gdp/100')
+```
+
+
+## 女性各年龄段和性别的自杀率与人均GDP对比时序图
+```{r}
+data3<-data1[data1$sex=='female',]
+ggplot()+geom_bar(data=per_gdp,aes(x=year,y=gdp_per_capita..../100),stat='identity',alpha=0.2)+geom_line(data=data3,aes(x=year,y=suicides.100k.pop,group=group,color=group))+ylab('suicide rate(1/10000) & per gdp/100')
+```
+
+##选取75岁以上的男性和女性作为研究对象
+```{r}
+male_75<-ts(data2[data2$age=='75+ years',c(4:9)],start = 1985)
+male_75[,3]<-log(100*male_75[,3])#自杀率取对数
+male_75[,2]<-log(100*male_75[,2])#人口取对数
+male_75[,4]<-log(100*male_75[,4])#gdp取对数
+male_75[,5]<-log(100*male_75[,5])#人均gdp取对数
+plot(male_75)
+female_75<-ts(data3[data2$age=='75+ years',c(4:9)],start = 1985)
+female_75[,3]<-log(100*female_75[,3])
+female_75[,2]<-log(100*female_75[,2])#人口取对数
+female_75[,4]<-log(100*female_75[,4])#gdp取对数
+female_75[,5]<-log(100*female_75[,5])#人均gdp取对数
+plot(female_75)
+
+male_75_rate<-male_75[,3]
+female_75_rate<-female_75[,3]
+per_gdp<-male_75[,5]
+gdp<-male_75[,4]
+population<-male_75[,2]
+generation<-male_75[,6]
+```
+# 初步检验
+
+## 平稳性检验
+```{r}
+library(aTSA)
+library(TSA)
+library(forecast)
+
+adf.test(female_75_rate)#非平稳
+adf.test(diff(female_75_rate))#一阶差分平稳
+Box.test(diff(female_75_rate))#白噪声
+
+adf.test(male_75_rate)#非平稳
+adf.test(diff(male_75_rate))#一阶差分平稳
+Box.test(diff(male_75_rate))#白噪声
+
+adf.test(per_gdp)
+adf.test(diff(per_gdp))#一阶差分平稳
+Box.test(diff(per_gdp))
+
+adf.test(population)
+adf.test(diff(population))
+adf.test(diff(diff(population)))#二阶差分平稳
+Box.test(diff(population))
+```
+
+## 互相关系数
+```{r}
+ccf(per_gdp,female_75_rate)#0阶滞后
+ccf(per_gdp,male_75_rate)#0阶滞后
+
+ccf(population,female_75_rate)#0阶滞后
+ccf(population,male_75_rate)#0阶滞后
+
+```
+
+
+
+# arima模型
+
+## acf和pacf图
+```{r}
+par(mfrow=c(1,2))
+acf(male_75_rate,lag.max = 30)
+pacf(male_75_rate,lag.max = 30)
+
+acf(female_75_rate,lag.max = 30)
+pacf(female_75_rate,lag.max = 30)#白噪声
+
+acf(diff(male_75_rate),lag.max = 30)
+pacf(diff(male_75_rate),lag.max = 30)
+
+acf(diff(female_75_rate),lag.max = 30)
+pacf(diff(female_75_rate),lag.max = 30)#白噪声
+
+auto.arima(male_75_rate)#(0,1,1)
+auto.arima(female_75_rate)#(1,0,0)
+
+
+fit1<-Arima(male_75_rate,order = c(0,1,0),include.drift = T)
+fit1
+fit2<-Arima(female_75_rate,order = c(0,1,0),include.drift = T)
+fit2
+```
+
+## 残差检验
+```{r}
+tsdiag(fit1)
+tsdiag(fit2)
+```
+
+## 拟合和预测
+```{r}
+par(mfrow=c(1,2))
+fore1<-forecast::forecast(fit1,h=5)
+plot(fore1,main = '男性自杀率ARIMA(0,1,0)')
+lines(fore1$fitted,col=2)
+
+fore2<-forecast::forecast(fit2,h=5)
+plot(fore2,main='女性自杀率ARIMA(0,1,0)')
+lines(fore2$fitted,col=2)
+```
+
+# arimax模型
+```{r}
+arimax_male<-auto.arima(diff(male_75_rate),xreg=cbind(diff(per_gdp),diff(population),diff(gdp),diff(generation)),parallel=TRUE)
+arimax_male
+arimax_female<-auto.arima(diff(female_75_rate),xreg=cbind(diff(per_gdp),diff(population),diff(gdp),diff(generation)),parallel=TRUE)
+arimax_female
+```
+
+## 残差检验
+```{r}
+tsdiag(arimax_male)
+tsdiag(arimax_female)
+```
+
+# 协整模型
+
+## 协整检验
+```{r}
+coint.test(male_75_rate,data.matrix(data.frame(per_gdp,population)),d=1)#协整
+coint.test(female_75_rate,data.matrix(data.frame(per_gdp,population)),d=1)#协整
+```
+
+## 协整模型和ECM模型
+```{r}
+#男性自杀率协整模型
+fit3<-Arima(male_75_rate,xreg=cbind(population,per_gdp),order = c(0,1,0),include.drift = T)
+adf.test(fit3$residuals)
+Box.test(fit3$residuals)
+fit3
+#女性自杀率协整模型
+fit4<-Arima(female_75_rate,xreg=cbind(population,per_gdp),order = c(0,1,0),include.drift = T)
+adf.test(fit4$residuals)
+Box.test(fit4$residuals)
+fit4
+
+#ECM模型
+ecm(diff(male_75_rate),cbind(diff(population),diff(per_gdp)))
+ecm(diff(female_75_rate),cbind(diff(population),diff(per_gdp)))
+```
+
+## 残差检验
+```{r}
+tsdiag(fit3)
+tsdiag(fit4)
+```
+
+## 格兰杰因果检验
+```{r}
+library(lmtest)
+grangertest(diff(population),diff(male_75_rate),order=2)
+grangertest(diff(per_gdp),diff(male_75_rate),order=1)
+grangertest(diff(population),diff(female_75_rate),order=1)
+grangertest(diff(per_gdp),diff(female_75_rate,order=1))
+#没有明显因果关系
+```
+# 拟合与预测
+```{r}
+#拟合并预测解释变量
+fit_population<-Arima(population,order = c(0,1,0))
+fit_per_gdp<-Arima(per_gdp,order = c(0,1,0))
+fore_population<-forecast::forecast(fit_population,h=5)
+fore_per_gdp<-forecast::forecast(fit_per_gdp,h=5)
+#协整模型预测
+fore_male<-forecast::forecast(fit3,xreg=cbind(fore_population$mean,fore_per_gdp$mean),h=5)
+#绘图
+par(mfrow=c(1,2))
+plot(fore_male,main='男性自杀率协整模型')
+lines(fore_male$fitted,col=2)
+
+fore_female<-forecast::forecast(fit4,xreg=cbind(fore_population$mean,fore_per_gdp$mean),h=5)
+plot(fore_female,main='女性自杀率协整模型')
+lines(fore_female$fitted,col=2)
+```
+
